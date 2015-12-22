@@ -1,0 +1,204 @@
+start routine
+  launch patch
+  select first midi device (DS1)
+  turn off adc
+  turn on dsp
+  read in ID file
+
+need:
+  way to pre-enter in sequences by tap
+  design envelopes
+  add noise as oscillator choice
+  scale midi input for better frequency range
+  get musical scales to jumble up in sequences
+  
+
+could save as startup options https://puredata.info/docs/faq/pdsettings in ~/.pdsettings
+------------------------------------------
+------------------------------------------
+
+Change hostname on each chip. This is detailed at http://docs.getchip.com/#change-the-hostname
+In short, you need to edit a couple files and change "chip" to "boer0x"
+ sudo nano /etc/hostname
+ sudo nano /etc/hosts
+Also, I am on a Mac, so I like to add apple services:
+ sudo nano /etc/avahi/services/afpd.service
+and add this content:
+<?xml version="1.0" standalone='no'?><!--*-nxml-*-->
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+<name replace-wildcards="yes">%h</name>
+<service>
+<type>_afpovertcp._tcp</type>
+<port>548</port>
+</service>
+</service-group>
+Restart avahi
+ sudo /etc/init.d/avahi-daemon restart
+
+----
+sudo nmcli c delete test_chip_ap
+connect CHIP to the internet
+  sudo nmcli d wifi connect nayarita
+
+----
+setup the CHIPs for easy connection. 
+generate an SSH keypair on your computer
+  ssh-keygen -t rsa
+and save it to
+  ~/.ssh/id_rsa.pub
+copy it to the CHIPs:
+  scp ~/.ssh/id_rsa.pub chip@<chip name or IP>:~/
+On CHIP, you'll want to set it up for ssh if it hasn't already been done, then copy the public key to it's authorized keyfile:
+  mkdir .ssh
+  cat id_rsa.pub >> .ssh/authorized_keys 
+  rm id_rsa.pub 
+  chmod go-w ~ 
+  chmod 700 ~/.ssh 
+  chmod 600 ~/.ssh/authorized_keys
+On your host machine, it's now easy to move all the PureData patches over without having to bother with login:
+  rsync -avzu  CHIPMAS/ chip@boer04.local:~/Documents/CHIPMAS
+  
+===
+install pd and rsync
+  sudo apt-get update
+  sudo apt-get install puredata rsync
+setup realtime priority for chip user for puredata:
+  sudo nano /etc/security/limits.conf
+where you add lines
+@audio - rtprio 99
+@audio - memlock unlimited
+reboot CHIP
+  sudo reboot
+ 
+---------
+Move files from host to CHIPs
+  scp -r CHIPMAS/ chip@boer01.local:~/Documents/
+or
+  rsync -avzu  CHIPMAS/ chip@boer01.local:~/Documents/CHIPMAS
+SSH to CHIP and get to the synth's directory:
+  ssh chip@chipboer01.local
+  cd ~/Documents/CHIPMAS
+change number in synthID.txt, for example, for channel 7, change the "1" to a "6" (IDs start at 0):
+  sed -i 's/1/6/g' synthID.txt
+  
+Put the launchpd script into init.d and make the necessary links in the rc?.d directories to launch the synth at startup:
+  sudo cp ~/Documents/CHIPMAS/launchpd.sh /etc/init.d
+  sudo update-rc.d launchpd.sh defaults 100
+(If you need to remove this startup feature later, use `sudo update-rc.d launchpd.sh remove` or `sudo update-rc.d launchpd.sh disable`)
+
+Do the same for boer00 for launchDS.pd
+
+appendix:
+sudo nmcli c down test_chip_ap
+sudo nmcli d wifi connect nayarita
+sudo nmcli c delete test_chip_ap
+
+
+----
+
+add patches for making MIDI work on #00
+
+
+------------
+setup a basic  wifi access point
+
+The first step is to configure CHIP to provide IP addresses through DHCP leases on the wlan1 interface. We are also making sure that we don't provide leases on wlan0, since that is usually used by CHIP to connect to outside networks.
+
+install dnsmasq:
+  sudo apt-get install dnsmasq
+the /etc/default/dnsmasq has the enable flag for running as daemon, if needed.
+create a configure file to restrict DHCP injections on client network interface. With this wlan0 becomes a way to connect to a network, and wlan1 becomes CHIPs access point.
+  sudo nano /etc/dnsmasq.d/access_point.conf
+add the lines
+  # If you want dnsmasq to listen for DHCP and DNS requests only on
+  # specified interfaces (and the loopback) give the name of the
+  # interface (eg eth0) here.
+  # Repeat the line for more than one interface.
+  interface=wlan1
+  # Or you can specify which interface _not_ to listen on
+  except-interface=wlan0
+we also want to set the range and time of leases:
+  # Uncomment this to enable the integrated DHCP server, you need
+  # to supply the range of addresses available for lease and optionally
+  # a lease time. If you have more than one network, you will need to
+  # repeat this for each network on which you want to supply DHCP
+  # service.
+  dhcp-range=172.20.0.100,172.20.0.250,1h
+set up a static IP for the access point. 
+  sudo nano /etc/network/interfaces
+
+and have the contents like so:
+  # interfaces(5) file used by ifup(8) and ifdown(8)
+  # Include files from /etc/network/interfaces.d:
+  
+  source-directory /etc/network/interfaces.d
+  
+  auto wlan1
+  
+  iface wlan1 inet static
+          address 172.20.0.1
+          netmask 255.255.255.0
+          
+confirm that the static IP is assigned:
+  sudo ifup wlan1
+  ip addr show wlan1
+and you'll see the address listed
+  inet 172.20.0.1
+
+now restart the DHCP server that dnsmasq provides
+  sudo /etc/init.d/dnsmasq restart
+  
+We have just tested the IP configuration portion. Now we can configure the WiFi access point on wlan1.
+create config file:
+  sudo nano /etc/hostapd.conf
+add lines:
+  interface=wlan1
+  driver=nl80211
+  ssid=test_chip_ap
+  channel=1
+  ctrl_interface=/var/run/hostapd
+then we can start the access point with
+  sudo hostapd /etc/hostapd.conf
+You'll see the network come up on another device, like your laptop or tablet or phone:
+  test_chip_ap
+
+Now we would like to configure CHIP to create the access point automatically on boot.
+We can setup a systemd service to do our bidding. We give a unique name, so it doesn't conflict with the system5 stuff in init.d:
+  sudo nano /lib/systemd/system/hostapd-systemd.service
+
+Fill the service file with these contents:
+  [Unit]                                                                               
+  Description=hostapd service
+  Wants=network-manager.service
+  After=network-manager.service
+  Wants=module-init-tools.service                                                      
+  After=module-init-tools.service                                                      
+  ConditionPathExists=/etc/hostapd.conf                                               
+
+  [Service]
+  ExecStart=/usr/sbin/hostapd /etc/hostapd.conf                                        
+
+  [Install]                                                                            
+  WantedBy=multi-user.target
+
+Disable the existing script for booting hostapd
+  sudo update-rc.d hostapd disable  
+Now we can setup the service with these commands:
+  sudo systemctl daemon-reload
+  sudo systemctl enable hostapd-systemd
+Reboot or test with these commands:
+  sudo systemctl start hostapd-systemd
+  systemctl status hostapd-systemd
+
+The access point and DHCP server should be accessible from other devices!
+
+If you want to connect another CHIP to this access point, you can do it from the GUI, or with the command:
+  sudo nmcli d wifi connect test_chip_ap
+--------------
+
+reality:
+need to start boer00 first, and launch it manually with 
+  ssh chip@boer00.local
+  /etc/init.d/launchDS.sh start
+then power up each synth voice CHIP and wait for it to respond, about 10-15 seconds.

@@ -1,0 +1,11 @@
+[Unit]
+Description=pd midi voice service
+Requires=lightdm.service
+After=lightdm.service 
+
+[Service]
+ExecStart=/usr/bin/pd -nogui -rt /home/chip/Documents/CHIPMAS/CHIPMASsynth.pd
+Type=idle
+
+[Install]
+WantedBy=multi-user.target
