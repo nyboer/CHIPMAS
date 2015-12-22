@@ -6,10 +6,10 @@ This is designed as a simple stand-alone synthesizer that works in tandem with t
 If you follow the instructions, the PD patch will load on CHIP boot and ready to play. Documentation can be found on [Hackster](https://www.hackster.io/11802/chip-midi-arpeggiating-synth-e311ab)
 
 This repo has 
--Pure Data synth patch
--Pure Data abstractions
--Preset data tables for Pure Data patch
--A simpler, older version of the synth patch ("grain_synth_2wave")
--[Touch OSC](http://hexler.net/software/touchosc) template for remote control
--Service script for systemd
--Optional, kinda hacky, service scripts for systemV if you're into that
+- Pure Data synth patch
+- Pure Data abstractions
+- Preset data tables for Pure Data patch
+- A simpler, older version of the synth patch ("grain_synth_2wave")
+- [Touch OSC](http://hexler.net/software/touchosc) template for remote control
+- Service script for systemd
+- Optional, kinda hacky, service scripts for systemV if you're into that
